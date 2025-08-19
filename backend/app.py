@@ -66,9 +66,9 @@ def _ensure_uid():
 
 DB_PATH = os.getenv("DB_PATH", "app.db")
 
-
 def _db():
     conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+    conn.execute("PRAGMA journal_mode=WAL;")
     conn.row_factory = sqlite3.Row
     return conn
 
@@ -107,8 +107,13 @@ def _init_db():
           amount  REAL NOT NULL DEFAULT 0,
           date    TEXT NOT NULL DEFAULT '',
           ccy     TEXT NOT NULL DEFAULT 'USD'
-        )"""
-        )
+        )""")
+
+        # indexes for faster per-user queries
+        c.execute("CREATE INDEX IF NOT EXISTS idx_holdings_user ON holdings(user_id)")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_alerts_user   ON alerts(user_id)")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_goals_user    ON goals(user_id)")
+
         conn.commit()
 
 
@@ -133,11 +138,20 @@ def _after_any_response(resp):
             signed,
             max_age=365 * 24 * 3600,
             httponly=True,
-            # If your frontend is on a different site/domain, use "None" here via env.
-            # If it's same-site (same domain or just different port), "Lax" is fine.
             samesite=os.getenv("COOKIE_SAMESITE", "Lax"),
             secure=(request.is_secure or os.getenv("FORCE_SECURE_COOKIES") == "1"),
         )
+
+    # light caching for read-only market endpoints
+    try:
+        path = request.path or ""
+        if path.startswith("/api/prices"):
+            resp.headers["Cache-Control"] = "public, max-age=30"
+        elif path.startswith("/api/history"):
+            resp.headers["Cache-Control"] = "public, max-age=300"
+    except Exception:
+        pass
+
     return resp
 
 
@@ -512,9 +526,9 @@ def fx_rates():
 
     # 2) open.er-api.com
     try:
-        r = SESSION.get("https://open.erapi.com/v6/latest/USD", timeout=8)
-        if r.status_code == 404:  # some mirrors use open.er-api.com
-            r = SESSION.get("https://open.er-api.com/v6/latest/USD", timeout=8)
+        r = SESSION.get("https://open.er-api.com/v6/latest/USD", timeout=8)
+        if r.status_code == 404:  # in case a mirror without hyphen is in use
+            r = SESSION.get("https://open.erapi.com/v6/latest/USD", timeout=8)
         j = r.json() if r.headers.get("content-type", "").startswith("application/json") else {}
         rates = _normalize_rates(j.get("rates"))
         # keep only wanted + USD
@@ -525,6 +539,7 @@ def fx_rates():
             return jsonify(rates)
     except Exception:
         pass
+
 
     # 3) Frankfurter
     try:

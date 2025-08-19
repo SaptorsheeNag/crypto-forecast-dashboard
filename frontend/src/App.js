@@ -19,10 +19,16 @@ import { TimeScale } from 'chart.js';
 import 'chartjs-adapter-date-fns';
 import annotationPlugin from 'chartjs-plugin-annotation';
 
-axios.defaults.withCredentials = true;
+// ONE source of truth for the API base
+const API_BASE =
+  process.env.REACT_APP_API_URL ||   // old name (keep!)
+  process.env.REACT_APP_API_BASE ||  // new name
+  'http://localhost:5000';
 
-const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:5000';
-axios.defaults.baseURL = API_URL;
+export const api = axios.create({
+  baseURL: API_BASE,
+  withCredentials: true, // needed for the signed uid cookie
+});
 
 // hex -> rgba helper for translucent fills
 function rgba(hex, a = 0.15) {
@@ -231,7 +237,7 @@ function App() {
   // -----------------------------
   useEffect(() => {
     const fetchData = () => {
-      axios
+      api
         .get('/api/prices')
         .then(res => {
           setPrices(res.data);
@@ -255,7 +261,7 @@ function App() {
   useEffect(() => {
     if (!selectedCoin) return;
 
-    axios
+    api
       .get(`/api/history/${selectedCoin}/${days}`)
       .then(res => {
         setHistoryData(res.data.prices); // response = [timestamp, price]
@@ -276,7 +282,7 @@ function App() {
       try {
         const entries = await Promise.all(
           coins.map(c =>
-            axios
+            api
               .get(`/api/history/${c}/${days}`)
               .then(res => [c, res.data?.prices || []])
               .catch(() => [c, []])
@@ -299,7 +305,7 @@ function App() {
   // Sentiment (refresh on coin change)
   useEffect(() => {
     if (!selectedCoin) return;
-    axios.get(`/api/sentiment/${selectedCoin}`)
+    api.get(`/api/sentiment/${selectedCoin}`)
       .then(res => setSentiment(res.data || { score: null, items: [] }))
       .catch(() => setSentiment({ score: null, items: [] }));
   }, [selectedCoin]);
@@ -307,7 +313,7 @@ function App() {
   // Volatility (refresh on coin OR days change)
   useEffect(() => {
     if (!selectedCoin) return;
-    axios.get(`/api/volatility/${selectedCoin}/${days}`)
+    api.get(`/api/volatility/${selectedCoin}/${days}`)
       .then(res => setVolatility(res.data || { annualized_vol: null }))
       .catch(() => setVolatility({ annualized_vol: null }));
   }, [selectedCoin, days]);
@@ -373,7 +379,7 @@ function App() {
 
   // Initialize anonymous session (sets HttpOnly uid cookie)
   useEffect(() => {
-    axios.get('/api/session/init').catch(() => { });
+    api.get('/api/session/init').catch(() => { });
   }, []);
 
   // Fetch USD-based FX rates from our backend (hourly cache)
@@ -381,7 +387,7 @@ function App() {
     let stop = false;
     async function fetchFx() {
       try {
-        const { data } = await axios.get('/api/fx');
+        const { data } = await api.get('/api/fx');
         if (!stop && data) setFx(data);   // e.g. {USD:1, EUR:0.91, GBP:0.78, INR:83.2, JPY:157.5}
       } catch (e) {
         console.warn('FX fetch failed; staying in USD', e);
@@ -401,9 +407,9 @@ function App() {
     async function loadAll() {
       try {
         const [h, a, g] = await Promise.all([
-          axios.get('/api/holdings'),
-          axios.get('/api/alerts'),
-          axios.get('/api/goal'),
+          api.get('/api/holdings'),
+          api.get('/api/alerts'),
+          api.get('/api/goal'),
         ]);
         setHoldings(h.data || []);
         setAlerts(a.data || []);
@@ -459,7 +465,7 @@ function App() {
 
       // === NORMAL BACKTEST (no radio selected) ===
       if (!whatIfMode) {
-        const { data: r } = await axios.get('/api/whatif', {
+        const { data: r } = await api.get('/api/whatif', {
           params: { coin_id, amount: amtUsd, date: isoDate }
         });
 
@@ -483,7 +489,7 @@ function App() {
 
       // === SHORT-TERM PREDICTION (≤180d) ===
       if (whatIfMode === 'short') {
-        const res = await axios.get('/api/whatif_predict', {
+        const res = await api.get('/api/whatif_predict', {
           params: { coin_id, amount: amtUsd, h: 120 }
         });
         const r = res.data;
@@ -507,7 +513,7 @@ function App() {
       }
 
       // === LONG-TERM MONTE-CARLO ===
-      const res = await axios.get('/api/whatif_scenario', {
+      const res = await api.get('/api/whatif_scenario', {
         params: { coin_id, amount: amtUsd, years: whatIfYears, n: 300 }
       });
       const r = res.data;
@@ -550,7 +556,7 @@ function App() {
 
       // === NORMAL BACKTEST (no radio selected) ===
       if (!dcaMode) {
-        const res = await axios.get('/api/dca', {
+        const res = await api.get('/api/dca', {
           params: { coin_id, amount: perUsd, freq: dca.freq, start: iso }
         });
         // Reuse the "short" UI (no CI bands)
@@ -560,7 +566,7 @@ function App() {
 
       // === SHORT-TERM PREDICTION (≤ ~6 months) ===
       if (dcaMode === 'short') {
-        const res = await axios.get('/api/dca_predict', {
+        const res = await api.get('/api/dca_predict', {
           params: { coin_id, amount: perUsd, freq: dca.freq, months: 4 }
         });
         setDcaRes({ kind: 'short', ...res.data });
@@ -568,7 +574,7 @@ function App() {
       }
 
       // === LONG-TERM MONTE-CARLO ===
-      const res = await axios.get('/api/dca_scenario', {
+      const res = await api.get('/api/dca_scenario', {
         params: { coin_id, amount: perUsd, freq: dca.freq, years: dcaYears, n: 300 }
       });
       setDcaRes({ kind: 'long', ...res.data });
@@ -586,7 +592,7 @@ function App() {
     if (!uniqueCoins.length) return [];
 
     const results = await Promise.all(uniqueCoins.map(c =>
-      axios.get(`/api/history/${c}/${days}`).then(r => [c, r.data?.prices || []])
+      api.get(`/api/history/${c}/${days}`).then(r => [c, r.data?.prices || []])
     ));
 
     const map = Object.fromEntries(results);
@@ -615,7 +621,7 @@ function App() {
       if (!pfMode) {
         // Try backend first (recommended)
         try {
-          const { data } = await axios.get('/api/portfolio_history'); // -> { series:[[ts,value],...]}
+          const { data } = await api.get('/api/portfolio_history'); // -> { series:[[ts,value],...]}
           setPfProj({ kind: 'short', series: data.series || [], bands: null });
           return;
         } catch (err) {
@@ -628,13 +634,13 @@ function App() {
 
       // === SHORT-TERM prediction (≤180d) ===
       if (pfMode === 'short') {
-        const res = await axios.get('/api/portfolio_forecast', { params: { h: pfH } });
+        const res = await api.get('/api/portfolio_forecast', { params: { h: pfH } });
         setPfProj({ kind: 'short', ...res.data });
         return;
       }
 
       // === LONG-TERM (Monte-Carlo) ===
-      const res = await axios.get('/api/portfolio_scenario', { params: { years: pfYears } });
+      const res = await api.get('/api/portfolio_scenario', { params: { years: pfYears } });
       setPfProj({ kind: 'long', ...res.data });
     } catch (err) {
       console.error('portfolio projection failed', err);
@@ -649,7 +655,7 @@ function App() {
   async function addHoldingServer(h) {
     // h: { coin, amount, buyPrice }
     try {
-      const res = await axios.post('/api/holdings', h);
+      const res = await api.post('/api/holdings', h);
       setHoldings(prev => [res.data, ...prev]); // res.data should include id
       toast.success('Holding added');
     } catch (e) {
@@ -660,7 +666,7 @@ function App() {
 
   async function removeHoldingServer(id) {
     try {
-      await axios.delete(`/api/holdings/${id}`);
+      await api.delete(`/api/holdings/${id}`);
       setHoldings(prev => prev.filter(x => x.id !== id));
       toast('Removed holding');
     } catch (e) {
@@ -672,7 +678,7 @@ function App() {
   // -------- GOAL API --------
   async function saveGoalServer(next) {
     try {
-      const res = await axios.put('/api/goal', next);
+      const res = await api.put('/api/goal', next);
       setGoal(res.data);
       toast.success('Goal saved');
     } catch (e) {
@@ -685,7 +691,7 @@ function App() {
   async function addAlertServer(rule) {
     // rule: { coin, op, value }
     try {
-      const res = await axios.post('/api/alerts', rule);
+      const res = await api.post('/api/alerts', rule);
       setAlerts(prev => [res.data, ...prev]); // includes id
       toast.success('Alert added');
     } catch (e) {
@@ -696,7 +702,7 @@ function App() {
 
   async function removeAlertServer(id) {
     try {
-      await axios.delete(`/api/alerts/${id}`);
+      await api.delete(`/api/alerts/${id}`);
       setAlerts(prev => prev.filter(x => x.id !== id));
       toast('Removed alert');
     } catch (e) {
