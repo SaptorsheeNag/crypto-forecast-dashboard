@@ -1,27 +1,20 @@
-from flask import Flask, jsonify, request
-import requests, time, math, statistics, os
+from flask import Flask, jsonify, request, g, make_response
+import requests, time, math, statistics, os, sqlite3, secrets, random
 import datetime as dt
 from flask_cors import CORS
-import nltk
-from nltk.sentiment import SentimentIntensityAnalyzer
-from requests.adapters import HTTPAdapter
-from urllib3.util.retry import Retry
-import bisect
-from flask import g, make_response
-from itsdangerous import TimestampSigner, BadSignature
-import sqlite3, secrets
-import random
 from werkzeug.middleware.proxy_fix import ProxyFix
 from dotenv import load_dotenv
+from itsdangerous import TimestampSigner, BadSignature
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
+import nltk
+from nltk.sentiment import SentimentIntensityAnalyzer
+from contextlib import contextmanager
 
 app = Flask(__name__)
-
-# load .env if running outside flask CLI (safe to call always)
 load_dotenv()
-
 app.wsgi_app = ProxyFix(app.wsgi_app, x_proto=1, x_host=1)
 
-# -- deep-history fallback constants --
 ONE_DAY = 24 * 3600
 ONE_YEAR = 365 * ONE_DAY
 CRYPTOCOMPARE_API_KEY = os.getenv("CRYPTOCOMPARE_API_KEY", "")
@@ -37,16 +30,99 @@ app.config["SECRET_KEY"] = os.getenv(
     "APP_SECRET", "dev-secret-change-me"
 )  # ⚠️ set in prod
 
+# --- Anonymous uid cookie (signed) ---
+signer = TimestampSigner(app.config["SECRET_KEY"])
+
+DB_URL  = os.getenv("DATABASE_URL")
+DB_PATH = os.getenv("DB_PATH", "app.db")
+
+def _db():
+    """
+    Returns a connection to Postgres (Supabase) if DATABASE_URL is set,
+    otherwise SQLite. Always use _db() as with _db() as conn:.
+    """
+    if DB_URL:
+        # Postgres via Psycopg 3
+        import psycopg
+        from psycopg.rows import dict_row  # makes fetch* return dict-like rows
+        conn = psycopg.connect(DB_URL, autocommit=False, row_factory=dict_row)
+        return conn
+    else:
+        # SQLite (local/dev)
+        conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+        conn.execute("PRAGMA journal_mode=WAL;")
+        conn.row_factory = sqlite3.Row
+        return conn
+    
+# Small helper to get a cursor that yields dicts on Postgres; no-op for SQLite
+@contextmanager
+def _cursor(conn):
+    cur = conn.cursor()
+    try:
+        yield cur
+    finally:
+        try:
+            cur.close()
+        except Exception:
+            pass
+def _row_to_dict(row):
+    """Works for both sqlite3.Row and psycopg tuple rows with cursor.description."""
+    if isinstance(row, sqlite3.Row):
+        return {k: row[k] for k in row.keys()}
+    # psycopg returns tuples; use cursor.description from the connection
+    # We'll attach column names on fetch in the query helpers below when using Postgres.
+    # For simple use here: if it's already a dict, just return it.
+    if isinstance(row, dict):
+        return row
+    # generic tuple fallback (shouldn't hit if we fetch with dict cursor below)
+    return dict(row)
+
+def _init_db():
+    with _db() as conn:
+        with _cursor(conn) as c:
+            c.execute("""
+            CREATE TABLE IF NOT EXISTS holdings (
+            id         TEXT PRIMARY KEY,
+            user_id    TEXT NOT NULL,
+            coin       TEXT NOT NULL,
+            amount     REAL NOT NULL,
+            buy_price  REAL NOT NULL,
+            created_at INTEGER NOT NULL,
+            ccy        TEXT NOT NULL DEFAULT 'USD'
+            )""")
+            c.execute("""
+            CREATE TABLE IF NOT EXISTS alerts (
+            id         TEXT PRIMARY KEY,
+            user_id    TEXT NOT NULL,
+            coin       TEXT NOT NULL,
+            op         TEXT NOT NULL,
+            value      REAL NOT NULL,
+            created_at INTEGER NOT NULL,
+            ccy        TEXT NOT NULL DEFAULT 'USD'
+            )""")
+            c.execute("""
+            CREATE TABLE IF NOT EXISTS goals (
+            user_id TEXT PRIMARY KEY,
+            amount  REAL NOT NULL DEFAULT 0,
+            date    TEXT NOT NULL DEFAULT '',
+            ccy     TEXT NOT NULL DEFAULT 'USD'
+            )""")
+            # indexes (same syntax works on Postgres & SQLite)
+            c.execute("CREATE INDEX IF NOT EXISTS idx_holdings_user ON holdings(user_id)")
+            c.execute("CREATE INDEX IF NOT EXISTS idx_alerts_user   ON alerts(user_id)")
+            c.execute("CREATE INDEX IF NOT EXISTS idx_goals_user    ON goals(user_id)")
+            conn.commit()
+
+
+_init_db()
+
+
 # Allow cookies from your frontend
 CORS(
     app,
     resources={r"/api/*": {"origins": [FRONTEND_ORIGIN, "http://127.0.0.1:3000"]}},
     supports_credentials=True,
 )
-
-# --- Anonymous uid cookie (signed) ---
-signer = TimestampSigner(app.config["SECRET_KEY"])
-
 
 def _ensure_uid():
     raw = request.cookies.get("uid")
@@ -62,67 +138,6 @@ def _ensure_uid():
     uid = "u_" + secrets.token_urlsafe(16)
     g.uid = uid
     g._needs_cookie = True
-
-
-DB_PATH = os.getenv("DB_PATH", "app.db")
-
-def _db():
-    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
-    conn.execute("PRAGMA journal_mode=WAL;")
-    conn.row_factory = sqlite3.Row
-    return conn
-
-
-def _init_db():
-    with _db() as conn:
-        c = conn.cursor()
-        c.execute(
-            """
-        CREATE TABLE IF NOT EXISTS holdings (
-          id         TEXT PRIMARY KEY,
-          user_id    TEXT NOT NULL,
-          coin       TEXT NOT NULL,
-          amount     REAL NOT NULL,
-          buy_price  REAL NOT NULL,
-          created_at INTEGER NOT NULL,
-          ccy        TEXT NOT NULL DEFAULT 'USD'
-        )"""
-        )
-        c.execute(
-            """
-        CREATE TABLE IF NOT EXISTS alerts (
-          id         TEXT PRIMARY KEY,
-          user_id    TEXT NOT NULL,
-          coin       TEXT NOT NULL,
-          op         TEXT NOT NULL,          -- 'gte' or 'lte'
-          value      REAL NOT NULL,
-          created_at INTEGER NOT NULL,
-          ccy        TEXT NOT NULL DEFAULT 'USD'
-        )"""
-        )
-        c.execute(
-            """
-        CREATE TABLE IF NOT EXISTS goals (
-          user_id TEXT PRIMARY KEY,
-          amount  REAL NOT NULL DEFAULT 0,
-          date    TEXT NOT NULL DEFAULT '',
-          ccy     TEXT NOT NULL DEFAULT 'USD'
-        )""")
-
-        # indexes for faster per-user queries
-        c.execute("CREATE INDEX IF NOT EXISTS idx_holdings_user ON holdings(user_id)")
-        c.execute("CREATE INDEX IF NOT EXISTS idx_alerts_user   ON alerts(user_id)")
-        c.execute("CREATE INDEX IF NOT EXISTS idx_goals_user    ON goals(user_id)")
-
-        conn.commit()
-
-
-_init_db()
-
-
-def _row_to_dict(row):
-    return {k: row[k] for k in row.keys()}
-
 
 @app.before_request
 def _before_any_request():
@@ -164,12 +179,20 @@ def session_init():
 # ---- HOLDINGS ----
 @app.route("/api/holdings", methods=["GET"])
 def list_holdings():
+    sql = (
+    "SELECT id, coin, amount, buy_price as \"buyPrice\", ccy, created_at "
+    "FROM holdings WHERE user_id=%s ORDER BY created_at DESC"
+    if DB_URL else
+    "SELECT id, coin, amount, buy_price as buyPrice, ccy, created_at "
+    "FROM holdings WHERE user_id=? ORDER BY created_at DESC"
+    )
     with _db() as conn:
-        rows = conn.execute(
-            "SELECT id, coin, amount, buy_price as buyPrice, ccy, created_at FROM holdings WHERE user_id=? ORDER BY created_at DESC",
-            (g.uid,),
-        ).fetchall()
+        with _cursor(conn) as c:
+            c.execute(sql, (g.uid,))
+            rows = c.fetchall()
     return jsonify([_row_to_dict(r) for r in rows])
+
+
 
 # --- Normal (to-date) portfolio history: sum daily value across holdings ---
 @app.route("/api/portfolio_history")
@@ -185,10 +208,15 @@ def api_portfolio_history():
         return jsonify({"error": "Bad params"}), 400
 
     # load user holdings
+    sql = (
+        "SELECT coin, amount FROM holdings WHERE user_id=%s"
+        if DB_URL else
+        "SELECT coin, amount FROM holdings WHERE user_id=?"
+    )
     with _db() as conn:
-        rows = conn.execute(
-            "SELECT coin, amount FROM holdings WHERE user_id=?", (g.uid,)
-        ).fetchall()
+        with _cursor(conn) as c:
+            c.execute(sql, (g.uid,))
+            rows = c.fetchall()
 
     if not rows:
         return jsonify({"series": []})
@@ -223,23 +251,44 @@ def upsert_holding():
     if not coin or amount <= 0 or buy <= 0:
         return jsonify({"error": "Invalid holding."}), 400
     now = int(time.time())
+    sql = (
+    """
+    INSERT INTO holdings (id, user_id, coin, amount, buy_price, created_at, ccy)
+    VALUES (%s, %s, %s, %s, %s, %s, %s)
+    ON CONFLICT (id) DO UPDATE
+      SET coin=excluded.coin,
+          amount=excluded.amount,
+          buy_price=excluded.buy_price,
+          ccy=excluded.ccy
+    """
+    if DB_URL else
+    """
+    INSERT INTO holdings (id, user_id, coin, amount, buy_price, created_at, ccy)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(id) DO UPDATE
+      SET coin=excluded.coin,
+          amount=excluded.amount,
+          buy_price=excluded.buy_price,
+          ccy=excluded.ccy
+    """
+    )
     with _db() as conn:
-        conn.execute(
-            """
-            INSERT INTO holdings (id, user_id, coin, amount, buy_price, created_at, ccy)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(id) DO UPDATE SET coin=excluded.coin, amount=excluded.amount, buy_price=excluded.buy_price, ccy=excluded.ccy
-        """,
-            (hid, g.uid, coin, amount, buy, now, ccy),
-        )
+        with _cursor(conn) as c:
+            c.execute(sql, (hid, g.uid, coin, amount, buy, now, ccy))
         conn.commit()
-    return jsonify({"id": hid, "coin": coin, "amount": amount, "buyPrice": buy, "ccy": ccy})
+
 
 
 @app.route("/api/holdings/<hid>", methods=["DELETE"])
 def delete_holding(hid):
+    sql = (
+    "DELETE FROM holdings WHERE id=%s AND user_id=%s"
+    if DB_URL else
+    "DELETE FROM holdings WHERE id=? AND user_id=?"
+    )
     with _db() as conn:
-        conn.execute("DELETE FROM holdings WHERE id=? AND user_id=?", (hid, g.uid))
+        with _cursor(conn) as c:
+            c.execute(sql, (hid, g.uid))
         conn.commit()
     return jsonify({"ok": True})
 
@@ -247,11 +296,15 @@ def delete_holding(hid):
 # ---- ALERTS ----
 @app.route("/api/alerts", methods=["GET"])
 def list_alerts():
+    sql = (
+    "SELECT id, coin, op, value, ccy, created_at FROM alerts WHERE user_id=%s ORDER BY created_at DESC"
+    if DB_URL else
+    "SELECT id, coin, op, value, ccy, created_at FROM alerts WHERE user_id=? ORDER BY created_at DESC"
+    )
     with _db() as conn:
-        rows = conn.execute(
-            "SELECT id, coin, op, value, ccy, created_at FROM alerts WHERE user_id=? ORDER BY created_at DESC",
-            (g.uid,),
-        ).fetchall()
+        with _cursor(conn) as c:
+            c.execute(sql, (g.uid,))
+            rows = c.fetchall()
     return jsonify([_row_to_dict(r) for r in rows])
 
 
@@ -269,23 +322,44 @@ def upsert_alert():
     if not coin or op not in ("gte", "lte") or val <= 0:
         return jsonify({"error": "Invalid alert."}), 400
     now = int(time.time())
+    sql = (
+    """
+    INSERT INTO alerts (id, user_id, coin, op, value, created_at, ccy)
+    VALUES (%s, %s, %s, %s, %s, %s, %s)
+    ON CONFLICT (id) DO UPDATE
+      SET coin=excluded.coin,
+          op=excluded.op,
+          value=excluded.value,
+          ccy=excluded.ccy
+    """
+    if DB_URL else
+    """
+    INSERT INTO alerts (id, user_id, coin, op, value, created_at, ccy)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(id) DO UPDATE
+      SET coin=excluded.coin,
+          op=excluded.op,
+          value=excluded.value,
+          ccy=excluded.ccy
+    """
+    )
     with _db() as conn:
-        conn.execute(
-            """
-            INSERT INTO alerts (id, user_id, coin, op, value, created_at, ccy)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(id) DO UPDATE SET coin=excluded.coin, op=excluded.op, value=excluded.value, ccy=excluded.ccy
-        """,
-            (aid, g.uid, coin, op, val, now, ccy),
-        )
+        with _cursor(conn) as c:
+            c.execute(sql, (aid, g.uid, coin, op, val, now, ccy))
         conn.commit()
     return jsonify({"id": aid, "coin": coin, "op": op, "value": val, "ccy": ccy})
 
 
 @app.route("/api/alerts/<aid>", methods=["DELETE"])
 def delete_alert(aid):
+    sql = (
+    "DELETE FROM alerts WHERE id=%s AND user_id=%s"
+    if DB_URL else
+    "DELETE FROM alerts WHERE id=? AND user_id=?"
+    )
     with _db() as conn:
-        conn.execute("DELETE FROM alerts WHERE id=? AND user_id=?", (aid, g.uid))
+        with _cursor(conn) as c:
+            c.execute(sql, (aid, g.uid))
         conn.commit()
     return jsonify({"ok": True})
 
@@ -293,10 +367,15 @@ def delete_alert(aid):
 # ---- GOAL ----
 @app.route("/api/goal", methods=["GET"])
 def get_goal():
+    sql = (
+    "SELECT amount, date, ccy FROM goals WHERE user_id=%s"
+    if DB_URL else
+    "SELECT amount, date, ccy FROM goals WHERE user_id=?"
+    )
     with _db() as conn:
-        row = conn.execute(
-            "SELECT amount, date, ccy FROM goals WHERE user_id=?", (g.uid,)
-        ).fetchone()
+        with _cursor(conn) as c:
+            c.execute(sql, (g.uid,))
+            row = c.fetchone()
     if row:
         return jsonify(
             {"amount": row["amount"], "date": row["date"], "ccy": row["ccy"] or "USD"}
@@ -313,15 +392,28 @@ def put_goal():
         return jsonify({"error": "Invalid amount."}), 400
     date = str(data.get("date", "") or "")
     ccy = str(data.get("ccy", "USD")).upper()
+    sql = (
+    """
+    INSERT INTO goals (user_id, amount, date, ccy)
+    VALUES (%s, %s, %s, %s)
+    ON CONFLICT (user_id) DO UPDATE
+      SET amount=excluded.amount,
+          date=excluded.date,
+          ccy=excluded.ccy
+    """
+    if DB_URL else
+    """
+    INSERT INTO goals (user_id, amount, date, ccy)
+    VALUES (?, ?, ?, ?)
+    ON CONFLICT(user_id) DO UPDATE
+      SET amount=excluded.amount,
+          date=excluded.date,
+          ccy=excluded.ccy
+    """
+    )
     with _db() as conn:
-        conn.execute(
-            """
-            INSERT INTO goals (user_id, amount, date, ccy)
-            VALUES (?, ?, ?, ?)
-            ON CONFLICT(user_id) DO UPDATE SET amount=excluded.amount, date=excluded.date, ccy=excluded.ccy
-        """,
-            (g.uid, amount, date, ccy),
-        )
+        with _cursor(conn) as c:
+            c.execute(sql, (g.uid, amount, date, ccy))
         conn.commit()
     return jsonify({"amount": amount, "date": date, "ccy": ccy})
 
@@ -1466,10 +1558,15 @@ def api_portfolio_forecast():
         return jsonify({"error": "Bad params"}), 400
 
     # load user holdings
+    sql = (
+        "SELECT coin, amount FROM holdings WHERE user_id=%s"
+        if DB_URL else
+        "SELECT coin, amount FROM holdings WHERE user_id=?"
+    )
     with _db() as conn:
-        rows = conn.execute(
-            "SELECT coin, amount FROM holdings WHERE user_id=?", (g.uid,)
-        ).fetchall()
+        with _cursor(conn) as c:
+            c.execute(sql, (g.uid,))
+            rows = c.fetchall()
 
     if not rows:
         return jsonify({"series": [], "bands": {"low": [], "high": []}})
@@ -1517,10 +1614,15 @@ def api_portfolio_scenario():
     except Exception:
         return jsonify({"error": "Bad params"}), 400
 
+    sql = (
+        "SELECT coin, amount FROM holdings WHERE user_id=%s"
+        if DB_URL else
+        "SELECT coin, amount FROM holdings WHERE user_id=?"
+    )
     with _db() as conn:
-        rows = conn.execute(
-            "SELECT coin, amount FROM holdings WHERE user_id=?", (g.uid,)
-        ).fetchall()
+        with _cursor(conn) as c:
+            c.execute(sql, (g.uid,))
+            rows = c.fetchall()
     if not rows:
         return jsonify({"p10": [], "p50": [], "p90": []})
 
