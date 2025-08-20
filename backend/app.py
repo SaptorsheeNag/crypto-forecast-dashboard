@@ -430,7 +430,7 @@ except LookupError:
     nltk.download("vader_lexicon", quiet=True)
 
 UA = {"User-Agent": "crypto-dashboard/1.0 (learning project)"}
-CG_KEY = os.getenv("COINGECKO_API_KEY")  # optional: demo/pro key
+CG_KEY = os.getenv("CG_KEY")  # optional: demo/pro key
 
 
 # ---------- single session + gentle retry ----------
