@@ -38,17 +38,25 @@ DB_PATH = os.getenv("DB_PATH", "app.db")
 
 def _db():
     """
-    Returns a connection to Postgres (Supabase) if DATABASE_URL is set,
-    otherwise SQLite. Always use _db() as with _db() as conn:.
+    Postgres when DATABASE_URL is set, else SQLite.
+    Appends sslmode=require to Postgres URL if missing.
     """
     if DB_URL:
-        # Postgres via Psycopg 3
         import psycopg
-        from psycopg.rows import dict_row  # makes fetch* return dict-like rows
-        conn = psycopg.connect(DB_URL, autocommit=False, row_factory=dict_row)
-        return conn
+        from psycopg.rows import dict_row
+
+        conninfo = DB_URL
+        # Ensure sslmode=require is present (important for Supabase/managed PG)
+        if "sslmode=" not in conninfo:
+            conninfo += ("&" if "?" in conninfo else "?") + "sslmode=require"
+
+        # A short connect timeout helps boot quickly if DB is unreachable.
+        # psycopg accepts connect_timeout in seconds via conninfo.
+        if "connect_timeout=" not in conninfo:
+            conninfo += ("&" if "?" in conninfo else "?") + "connect_timeout=5"
+
+        return psycopg.connect(conninfo, autocommit=False, row_factory=dict_row)
     else:
-        # SQLite (local/dev)
         conn = sqlite3.connect(DB_PATH, check_same_thread=False)
         conn.execute("PRAGMA journal_mode=WAL;")
         conn.row_factory = sqlite3.Row
@@ -114,7 +122,7 @@ def _init_db():
             conn.commit()
 
 
-_init_db()
+
 
 
 # Allow cookies from your frontend
@@ -168,6 +176,23 @@ def _after_any_response(resp):
         pass
 
     return resp
+
+# Run schema creation on the first HTTP request to this worker.
+# This prevents the app from crashing during import if the DB is temporarily down.
+SCHEMA_INITIALIZED = False
+
+@app.before_request
+def _bootstrap_schema_once():
+    global SCHEMA_INITIALIZED
+    if SCHEMA_INITIALIZED:
+        return
+    try:
+        _init_db()
+        SCHEMA_INITIALIZED = True
+        app.logger.info("DB schema initialized.")
+    except Exception as e:
+        # Don't crash on startup if DB is briefly unavailable
+        app.logger.exception("Skipping schema init (will retry on next request): %s", e)
 
 
 @app.route("/api/session/init", methods=["GET"])
