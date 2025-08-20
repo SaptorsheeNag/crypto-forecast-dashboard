@@ -42,20 +42,30 @@ def _db():
     Appends sslmode=require to Postgres URL if missing.
     """
     if DB_URL:
-        import psycopg
+        import os, psycopg
+        from urllib.parse import urlparse, parse_qs
         from psycopg.rows import dict_row
 
-        conninfo = DB_URL
-        # Ensure sslmode=require is present (important for Supabase/managed PG)
-        if "sslmode=" not in conninfo:
-            conninfo += ("&" if "?" in conninfo else "?") + "sslmode=require"
+        u = urlparse(DB_URL)
+        q = parse_qs(u.query)
 
-        # A short connect timeout helps boot quickly if DB is unreachable.
-        # psycopg accepts connect_timeout in seconds via conninfo.
-        if "connect_timeout=" not in conninfo:
-            conninfo += ("&" if "?" in conninfo else "?") + "connect_timeout=5"
+        # Pick host (DNS) and optional hostaddr (IPv4) from query
+        host = u.hostname
+        hostaddr = (q.get("hostaddr", [None])[0])  # optional
+        sslmode = (q.get("sslmode", ["require"])[0])
+        timeout = int(q.get("connect_timeout", ["5"])[0])
 
-        return psycopg.connect(conninfo, autocommit=False, row_factory=dict_row)
+        return psycopg.connect(
+            host=host,
+            hostaddr=hostaddr,   # leave None if not provided
+            port=u.port or 5432,
+            dbname=(u.path or "/postgres").lstrip("/"),
+            user=(u.username or "postgres"),
+            password=u.password,
+            sslmode=sslmode,
+            connect_timeout=timeout,
+            row_factory=dict_row,
+        )
     else:
         conn = sqlite3.connect(DB_PATH, check_same_thread=False)
         conn.execute("PRAGMA journal_mode=WAL;")
