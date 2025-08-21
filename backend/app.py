@@ -276,45 +276,58 @@ def api_portfolio_history():
 
 @app.route("/api/holdings", methods=["POST"])
 def upsert_holding():
-    data = request.get_json(force=True) or {}
-    hid = data.get("id") or ("h_" + secrets.token_urlsafe(12))
-    coin = str(data.get("coin", "")).lower()
-    ccy = str(data.get("ccy", "USD")).upper()
+    data = request.get_json(silent=True) or {}
+
+    # accept both naming styles
+    coin = (data.get("coin") or data.get("coin_id") or "").lower().strip()
+    ccy  = str(data.get("ccy") or "USD").upper()
+    hid  = data.get("id") or ("h_" + secrets.token_urlsafe(12))
+
     try:
-        amount = float(data.get("amount", 0) or 0)
-        buy = float(data.get("buyPrice", 0) or 0)
+        amount = float(data.get("amount") or 0)
+        buy    = float((data.get("buyPrice") or data.get("buy_price") or 0))
     except Exception:
         return jsonify({"error": "Invalid numeric fields."}), 400
+
     if not coin or amount <= 0 or buy <= 0:
         return jsonify({"error": "Invalid holding."}), 400
+
     now = int(time.time())
     sql = (
-    """
-    INSERT INTO holdings (id, user_id, coin, amount, buy_price, created_at, ccy)
-    VALUES (%s, %s, %s, %s, %s, %s, %s)
-    ON CONFLICT (id) DO UPDATE
-      SET coin=excluded.coin,
-          amount=excluded.amount,
-          buy_price=excluded.buy_price,
-          ccy=excluded.ccy
-    """
-    if DB_URL else
-    """
-    INSERT INTO holdings (id, user_id, coin, amount, buy_price, created_at, ccy)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
-    ON CONFLICT(id) DO UPDATE
-      SET coin=excluded.coin,
-          amount=excluded.amount,
-          buy_price=excluded.buy_price,
-          ccy=excluded.ccy
-    """
+        """
+        INSERT INTO holdings (id, user_id, coin, amount, buy_price, created_at, ccy)
+        VALUES (%s, %s, %s, %s, %s, %s, %s)
+        ON CONFLICT (id) DO UPDATE
+          SET coin=excluded.coin,
+              amount=excluded.amount,
+              buy_price=excluded.buy_price,
+              ccy=excluded.ccy
+        """
+        if DB_URL else
+        """
+        INSERT INTO holdings (id, user_id, coin, amount, buy_price, created_at, ccy)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(id) DO UPDATE
+          SET coin=excluded.coin,
+              amount=excluded.amount,
+              buy_price=excluded.buy_price,
+              ccy=excluded.ccy
+        """
     )
     with _db() as conn:
         with _cursor(conn) as c:
             c.execute(sql, (hid, g.uid, coin, amount, buy, now, ccy))
         conn.commit()
 
-
+    # ✅ return the saved row in the same shape list_holdings() uses (buyPrice camelCase)
+    return jsonify({
+        "id": hid,
+        "coin": coin,
+        "amount": amount,
+        "buyPrice": buy,
+        "ccy": ccy,
+        "created_at": now
+    })
 
 @app.route("/api/holdings/<hid>", methods=["DELETE"])
 def delete_holding(hid):

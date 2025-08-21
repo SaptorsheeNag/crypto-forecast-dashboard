@@ -422,7 +422,7 @@ function App() {
           api.get('/api/alerts'),
           api.get('/api/goal'),
         ]);
-        setHoldings(h.data || []);
+        setHoldings((h.data || []).map(x => ({ ...x, id: x.id || x._id })));
         setAlerts(a.data || []);
         setGoal(g.data || { amount: "", date: "" });
       } catch (e) {
@@ -666,8 +666,12 @@ function App() {
   async function addHoldingServer(h) {
     // h: { coin, amount, buyPrice }
     try {
-      const res = await api.post('/api/holdings', h);
-      setHoldings(prev => [res.data, ...prev]); // res.data should include id
+      const res = await api.post('/api/holdings', h, {
+      headers: { 'Content-Type': 'application/json' }
+      });
+      // normalize id just in case
+      const saved = { ...res.data, id: res.data.id || res.data._id };
+      setHoldings(prev => [saved, ...prev]);
       toast.success('Holding added');
     } catch (e) {
       console.error(e);
