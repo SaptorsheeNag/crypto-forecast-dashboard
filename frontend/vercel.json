@@ -1,0 +1,5 @@
+{
+  "rewrites": [
+    { "source": "/api/:match*", "destination": "https://crypto-forecast-dashboard-soif.onrender.com/api/:match*" }
+  ]
+}
