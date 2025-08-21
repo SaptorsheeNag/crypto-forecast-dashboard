@@ -90,15 +90,15 @@ button:hover {
   }
 }
 
-
 .chart-container {
-  max-width: 700px;
   margin: 2rem auto;
   background: rgba(255, 255, 255, 0.04);
   border-radius: 12px;
   padding: 1rem;
   box-shadow: 0 0 10px rgba(75, 192, 192, 0.3);
+  position: relative; /* lets Chart.js fill container when maintainAspectRatio:false */
 }
+
 
 .coin-logo {
   width: 20px;
@@ -866,6 +866,9 @@ button:hover {
   backdrop-filter: none !important;
 }
 
+/* Force full width inside the MV hero */
+.mv-hero .chart-container { max-width: 100% !important; }
+
 /* Make room inside the MV hero and keep the left glow off the chart */
 .mv-hero { padding-left: 18px; }
 
@@ -1095,6 +1098,192 @@ button:hover {
   transform: translateY(-2px) scale(1.08);
   box-shadow: 0 4px 14px rgba(148,93,214,.35);
 }
+
+/* =========================
+   RESPONSIVE ADD-ON (paste at end)
+   ========================= */
+
+/* Make charts always fill the container width */
+.chart-container,
+.compare-chart {
+  width: 100%;
+  max-width: 100%;
+}
+.chart-container canvas,
+.compare-chart canvas {
+  display: block;
+  width: 100% !important;
+  height: auto !important;            /* lets Chart.js scale smoothly */
+}
+
+/* Safer padding on very small displays + notches */
+@supports(padding: max(0px)) {
+  .app {
+    padding-left: max(1rem, env(safe-area-inset-left));
+    padding-right: max(1rem, env(safe-area-inset-right));
+  }
+}
+
+/* ---------- XL (≥1440px): breathe more on desktops ---------- */
+@media (min-width: 1440px) {
+  .app { padding-left: 3rem; padding-right: 3rem; }
+  .chart-container { max-width: 1100px; }
+}
+
+/* ---------- LG (1025–1439px): default desktop/laptop ---------- */
+@media (min-width: 1025px) and (max-width: 1439px) {
+  .chart-container { max-width: 960px; }
+}
+
+/* ---------- MD (769–1024px): tablets landscape / small laptops ---------- */
+@media (min-width: 769px) and (max-width: 1024px) {
+  .price-list { justify-content: flex-start; }
+  .price-list li { padding: .9rem 1.3rem; font-size: 1.05rem; }
+  .chart-container { max-width: 860px; }
+  .sv-grid { grid-template-columns: 1fr 1fr; }
+}
+
+@media (min-width: 1440px) {
+  .compare-chart { max-width: 1100px; }
+}
+
+@media (min-width: 1025px) and (max-width: 1439px) {
+  .compare-chart { max-width: 960px; }
+}
+
+@media (min-width: 769px) and (max-width: 1024px) {
+  .compare-chart { max-width: 860px; }
+}
+
+
+/* ---------- SM (481–768px): tablets portrait / big phones ---------- */
+@media (max-width: 768px) {
+  header { gap: 10px; }
+  .app { padding: 1.25rem; padding-top: calc(1.25rem + var(--banner-h)); }
+
+  .page-title { font-size: clamp(20px, 4.2vw, 26px); }
+  .hero { padding: 22px 18px; border-radius: 16px; }
+  .hero-ctas { gap: 8px; }
+  .hero-right { height: 140px; }
+  .b1 { width: 120px; height: 120px; }
+  .b2 { width: 150px; height: 150px; }
+  .b3 { width: 130px; height: 130px; }
+
+  .price-list { gap: .6rem; }
+  .price-list li { padding: .8rem 1.1rem; font-size: 1.02rem; }
+
+  .mv-panel { margin-block: 16px; }
+  .mv-controls { justify-content: center; }
+
+  .compare-buttons { gap: .5rem; }
+  .compare-buttons button { padding: .4rem .8rem; }
+
+  /* KPI cards stack nicely */
+  .pf-kpis { grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 8px; }
+  .kpi-value { font-size: 1.15rem; }
+}
+
+/* ---------- XS (≤480px): phones ---------- */
+@media (max-width: 480px) {
+  :root { --banner-h: 40px; }
+
+  .app { padding: 1rem; padding-top: calc(1rem + var(--banner-h)); }
+  header { flex-direction: column; align-items: stretch; gap: 8px; }
+
+  .hero { padding: 18px 14px; }
+  .hero-title { font-size: clamp(20px, 6vw, 26px); }
+  .hero-badge { padding: 5px 10px; font-size: 13px; }
+  .hero-sub { font-size: 14px; }
+
+  /* time range buttons wrap into 2+ rows comfortably */
+  .time-buttons { gap: 8px; }
+  .time-buttons button { padding: .35rem .8rem; font-size: .9rem; }
+
+  /* price chips more compact */
+  .price-list { justify-content: center; }
+  .price-list li { padding: .7rem .95rem; font-size: .98rem; border-radius: 12px; }
+
+  /* alerts / forms — full width fields */
+  .alert-form, .pf-form, .goal-form { gap: .45rem; }
+  .alert-form select,
+  .alert-form input[type="number"],
+  .pf-form select, .pf-form input,
+  .goal-form input, .goal-form select {
+    min-width: 100%;
+    width: 100%;
+  }
+
+  /* charts: reduce outside shadow for tighter spaces */
+  .mv-hero,
+  .mv-panel { box-shadow: 0 6px 16px rgba(0,0,0,.18); }
+
+  /* table: make scrollable instead of squishing */
+  .pf-table { 
+    display: block; 
+    overflow-x: auto; 
+    white-space: nowrap;
+    border-spacing: 0;     /* keep rows tidy when scrolling */
+  }
+  .pf-table th, .pf-table td {
+    padding: .5rem .6rem;
+  }
+}
+
+/* ---------- tiny devices (≤360px): very small phones ---------- */
+@media (max-width: 360px) {
+  .mb-links { display: none; }                 /* hide social icons to save room */
+  .maker-banner { gap: 6px; }
+  .mb-text { font-size: 12px; letter-spacing: .7px; }
+  .cta { padding: 8px 10px; font-size: 14px; }
+  .mv-seg button { padding: .35rem .7rem; font-size: .85rem; }
+}
+
+/* Improve tap targets & avoid hover-only effects on touch */
+@media (hover: none) {
+  .price-item:hover,
+  .mv-panel:hover,
+  .mv-seg button:hover,
+  .mv-hero .chart-container:hover,
+  .mv-hero .compare-chart:hover { 
+    transform: none;
+    box-shadow: none;
+  }
+  button { box-shadow: none; }
+}
+
+/* prefers-reduced-motion: tone down animations for accessibility */
+@media (prefers-reduced-motion: reduce) {
+  * { animation: none !important; transition: none !important; }
+}
+
+.pf-table-wrap {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* === Unified chart heights === */
+/* default: desktop */
+.chart-container,
+.compare-chart {
+  height: 320px;
+}
+
+/* tablets / small laptops */
+@media (min-width: 481px) and (max-width: 1024px) {
+  .chart-container,
+  .compare-chart {
+    height: 300px;
+  }
+}
+
+/* phones */
+@media (max-width: 480px) {
+  .chart-container,
+  .compare-chart {
+    height: 260px;
+  }
+}
+
 
 
 

@@ -232,6 +232,17 @@ function App() {
     return Math.max(0, Math.min(100, (totalValue / Number(goalAmount)) * 100));
   }
 
+  // --- Sync dark mode with OS preference once and keep it in sync ---
+  useEffect(() => {
+    if (!window?.matchMedia) return;
+    const mq = window.matchMedia('(prefers-color-scheme: dark)');
+    setDarkMode(mq.matches); // initial
+    const onChange = (e) => setDarkMode(e.matches);
+    mq.addEventListener?.('change', onChange);
+    return () => mq.removeEventListener?.('change', onChange);
+  }, []);
+
+
   // -----------------------------
   // 3) Existing effect: live prices (poll)
   // -----------------------------
@@ -759,6 +770,8 @@ function App() {
   const gx = gridStyle(darkMode);
   const chartOptions = {
     responsive: true,
+    maintainAspectRatio: false, 
+    resizeDelay: 100, // optional: smoother resize
     layout: { padding: { left: 10, right: 8, top: 4, bottom: 4 } },
     interaction: { mode: 'index', intersect: false },
     elements: { point: { radius: 0, hitRadius: 10, hoverRadius: 4 } },
@@ -834,6 +847,8 @@ function App() {
   const gc = gridStyle(darkMode);
   const compareChartOptions = {
     responsive: true,
+    maintainAspectRatio: false,
+    resizeDelay: 100, // optional: smoother resize
     layout: { padding: { left: 10, right: 8, top: 4, bottom: 4 } },
     interaction: { mode: 'index', intersect: false },
     elements: { point: { radius: 0 } },
@@ -1155,7 +1170,7 @@ function App() {
 
 
       {loading ? (
-        <p className="loading">Loading prices...</p>
+        <p className="loading" role="status" aria-live="polite">Loading prices…</p>
       ) : (
         <>
           {/* price chips */}
@@ -1192,7 +1207,13 @@ function App() {
               <div className="mv-controls">
                 <div className="time-buttons mv-seg">
                   {['1', '7', '30'].map(d => (
-                    <button key={d} className={days === d ? 'active' : ''} onClick={() => setDays(d)}>
+                    <button
+                      key={d}
+                      type="button"
+                      aria-pressed={days === d}
+                      className={days === d ? 'active' : ''}
+                      onClick={() => setDays(d)}
+                    >
                       {d === '1' ? '24H' : d === '7' ? '7D' : '1M'}
                     </button>
                   ))}
@@ -1211,6 +1232,8 @@ function App() {
                   {['off', 'DOGE vs BTC', 'ETH vs DOGE', 'ETH vs BTC', 'BTC vs ETH vs DOGE'].map(name => (
                     <button
                       key={name}
+                      type="button"
+                      aria-pressed={compareMode === name}
                       className={compareMode === name ? 'active' : ''}
                       onClick={() => setCompareMode(name)}
                       title={name === 'off' ? 'Hide comparison' : name}
@@ -1366,6 +1389,7 @@ function App() {
                 <div className="mv-seg" style={{ display:'flex', gap:8, flexWrap:'wrap', alignItems:'center' }}>
                   <button
                     type="button"
+                    aria-pressed={!whatIfMode}
                     className={!whatIfMode ? 'active' : ''}
                     onClick={() => { setWhatIfMode(null); setWhatIfRes(null); }}
                     title="Backtest from your chosen start date to today"
@@ -1375,6 +1399,7 @@ function App() {
 
                   <button
                     type="button"
+                    aria-pressed={whatIfMode === 'short'}
                     className={whatIfMode === 'short' ? 'active' : ''}
                     onClick={() => { setWhatIfMode('short'); setWhatIfRes(null); }}
                     title="Project a few months ahead with bands"
@@ -1384,6 +1409,7 @@ function App() {
 
                   <button
                     type="button"
+                    aria-pressed={whatIfMode === 'long'}
                     className={whatIfMode === 'long' ? 'active' : ''}
                     onClick={() => { setWhatIfMode('long'); setWhatIfRes(null); }}
                     title="Monte-Carlo fan of outcomes"
@@ -1481,6 +1507,8 @@ function App() {
                           }}
                           options={{
                             responsive:true,
+                            maintainAspectRatio: false,
+                            resizeDelay: 100, // optional: smoother resize
                             interaction:{ mode:'index', intersect:false },
                             elements:{ point:{ radius:0, hitRadius:10, hoverRadius:4 } },
                             plugins:{ legend:{ labels:{ color: darkMode ? '#fff' : '#000' } },
@@ -1501,6 +1529,8 @@ function App() {
                         data={whatIfChart}
                         options={{
                           responsive: true,
+                          maintainAspectRatio: false,
+                          resizeDelay: 100, // optional: smoother resize
                           interaction: { mode: 'index', intersect: false },
                           elements: { point: { radius: 0, hitRadius: 10, hoverRadius: 4 } },
                           plugins: {
@@ -1603,6 +1633,7 @@ function App() {
       <div className="mv-seg" style={{ display:'flex', gap:8, flexWrap:'wrap', alignItems:'center' }}>
         <button
           type="button"
+          aria-pressed={!dcaMode}
           className={!dcaMode ? 'active' : ''}
           onClick={() => { setDcaMode(null); setDcaRes(null); }}
           title="Backtest your DCA plan to today"
@@ -1612,6 +1643,7 @@ function App() {
 
         <button
           type="button"
+          aria-pressed={dcaMode === 'short'}
           className={dcaMode === 'short' ? 'active' : ''}
           onClick={() => { setDcaMode('short'); setDcaRes(null); }}
           title="Project a few months ahead with bands"
@@ -1621,6 +1653,7 @@ function App() {
 
         <button
           type="button"
+          aria-pressed={dcaMode === 'long'}
           className={dcaMode === 'long' ? 'active' : ''}
           onClick={() => { setDcaMode('long'); setDcaRes(null); }}
           title="Monte-Carlo fan of outcomes"
@@ -1755,6 +1788,8 @@ function App() {
                   data={{ datasets }}
                   options={{
                     responsive: true,
+                    maintainAspectRatio: false,
+                    resizeDelay: 100, // optional: smoother resize
                     interaction: { mode: 'index', intersect: false },
                     elements: { point: { radius: 0, hitRadius: 10, hoverRadius: 4 } },
                     plugins: {
@@ -1797,6 +1832,8 @@ function App() {
                 }}
                 options={{
                   responsive:true,
+                  maintainAspectRatio: false, 
+                  resizeDelay: 100, // optional: smoother resize
                   interaction:{ mode:'index', intersect:false },
                   elements:{ point:{ radius:0, hitRadius:10, hoverRadius:4 } },
                   plugins:{ legend:{ labels:{ color: darkMode ? '#fff' : '#000' } },
@@ -1862,53 +1899,55 @@ function App() {
   {holdings.length === 0 ? (
     <p className="muted">No holdings yet. Add one above.</p>
   ) : (
-    <table className="pf-table">
-      <thead>
-        <tr>
-          <th>Coin</th>
-          <th>Amount</th>
-          <th>Buy @</th>
-          <th>Current</th>
-          <th>Value</th>
-          <th>P/L</th>
-          <th></th>
-        </tr>
-      </thead>
-      <tbody>
-        {holdings.map(h => {
-          const curUsd = px(h.coin);
-          const curSel = curUsd != null ? convert(curUsd, 'USD', ccy, fx) : null;
-          const buySel = convert(h.buyPrice, h.ccy || 'USD', ccy, fx);
-          const valueSel = curSel != null ? h.amount * curSel : null;
-          const investedSel = h.amount * buySel;
-          const pnlSel = valueSel != null ? valueSel - investedSel : null;
-          const pnlPct = pnlSel != null && investedSel > 0 ? (pnlSel / investedSel) * 100 : null;
+    <div className="pf-table-wrap">
+      <table className="pf-table">
+        <thead>
+          <tr>
+            <th>Coin</th>
+            <th>Amount</th>
+            <th>Buy @</th>
+            <th>Current</th>
+            <th>Value</th>
+            <th>P/L</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {holdings.map(h => {
+            const curUsd = px(h.coin);
+            const curSel = curUsd != null ? convert(curUsd, 'USD', ccy, fx) : null;
+            const buySel = convert(h.buyPrice, h.ccy || 'USD', ccy, fx);
+            const valueSel = curSel != null ? h.amount * curSel : null;
+            const investedSel = h.amount * buySel;
+            const pnlSel = valueSel != null ? valueSel - investedSel : null;
+            const pnlPct = pnlSel != null && investedSel > 0 ? (pnlSel / investedSel) * 100 : null;
 
-          return (
-            <tr key={h.id}>
-              <td>{h.coin.toUpperCase()}</td>
-              <td>{h.amount}</td>
-              <td>{(CCY_SYMBOL[ccy] || '')}{fmt(buySel, ccy)}</td>
-              <td>{curSel != null ? `${CCY_SYMBOL[ccy] || ''}${fmt(curSel, ccy)}` : '—'}</td>
-              <td>{valueSel != null ? `${CCY_SYMBOL[ccy] || ''}${fmt(valueSel, ccy)}` : '—'}</td>
-              <td className={pnlSel == null ? '' : (pnlSel >= 0 ? 'pnl-pos' : 'pnl-neg')}>
-                {pnlSel != null ? (
-                  <>
-                    {(CCY_SYMBOL[ccy] || '')}{fmt(pnlSel, ccy)}
-                    {investedSel > 0 && <> ({pnlPct.toFixed(2)}%)</>}
-                  </>
-                ) : '—'}
-              </td>
-              <td>
-                <button className="link danger" onClick={() => removeHoldingServer(h.id)}>
-                  Remove
-                </button>
-              </td>
-            </tr>
-          );
-        })}
-      </tbody>
-    </table>
+            return (
+              <tr key={h.id}>
+                <td>{h.coin.toUpperCase()}</td>
+                <td>{h.amount}</td>
+                <td>{(CCY_SYMBOL[ccy] || '')}{fmt(buySel, ccy)}</td>
+                <td>{curSel != null ? `${CCY_SYMBOL[ccy] || ''}${fmt(curSel, ccy)}` : '—'}</td>
+                <td>{valueSel != null ? `${CCY_SYMBOL[ccy] || ''}${fmt(valueSel, ccy)}` : '—'}</td>
+                <td className={pnlSel == null ? '' : (pnlSel >= 0 ? 'pnl-pos' : 'pnl-neg')}>
+                  {pnlSel != null ? (
+                    <>
+                      {(CCY_SYMBOL[ccy] || '')}{fmt(pnlSel, ccy)}
+                      {investedSel > 0 && <> ({pnlPct.toFixed(2)}%)</>}
+                    </>
+                  ) : '—'}
+                </td>
+                <td>
+                  <button className="link danger" onClick={() => removeHoldingServer(h.id)}>
+                    Remove
+                  </button>
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
   )}
 
   {/* -- Summary & Goal -- */}
@@ -1954,6 +1993,7 @@ function App() {
         <div className="mv-seg" style={{ display:'flex', gap:8, flexWrap:'wrap', alignItems:'center' }}>
           <button
             type="button"
+            aria-pressed={!pfMode}
             className={!pfMode ? 'active' : ''}
             onClick={() => { setPfMode(null); setPfProj(null); }}
             title="Show portfolio value history up to today"
@@ -1963,6 +2003,7 @@ function App() {
 
           <button
             type="button"
+            aria-pressed={pfMode === 'short'}
             className={pfMode === 'short' ? 'active' : ''}
             onClick={() => { setPfMode('short'); setPfProj(null); }}
             title="Short-term forecast with bands"
@@ -1972,12 +2013,14 @@ function App() {
 
           <button
             type="button"
+            aria-pressed={pfMode === 'long'}
             className={pfMode === 'long' ? 'active' : ''}
             onClick={() => { setPfMode('long'); setPfProj(null); }}
             title="Monte-Carlo paths"
           >
             Long-term (Monte-Carlo)
           </button>
+
         </div>
 
         {pfMode === 'short' ? (
@@ -2036,6 +2079,8 @@ function App() {
         data={pfChart}
         options={{
           responsive: true,
+          maintainAspectRatio: false,
+          resizeDelay: 100, // optional: smoother resize
           interaction: { mode: 'index', intersect: false },
           elements: { point: { radius: 0, hitRadius: 10, hoverRadius: 4 } },
           plugins: {
